@@ -1,15 +1,18 @@
 import { useThemeStore } from '~/stores/theme'
 
-export default defineNuxtPlugin(() =>
-{
-	const themeStore = useThemeStore()
+export default defineNuxtPlugin(() => {
+  const themeStore = useThemeStore()
 
-	watch(
-		() => themeStore.current,
-		(newTheme) =>
-		{
-			document.documentElement.setAttribute('data-theme', newTheme)
-		},
-		{ immediate: true }
-	)
+  if (process.client) {
+    document.documentElement.setAttribute('data-theme', themeStore.current)
+  }
+
+  watch(
+    () => themeStore.current,
+    (newTheme) => {
+      if (process.client && newTheme) {
+        document.documentElement.setAttribute('data-theme', newTheme)
+      }
+    }
+  )
 })

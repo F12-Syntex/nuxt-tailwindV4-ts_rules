@@ -1,32 +1,15 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-	themes: nord, dracula;
+	themes: light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro, cyberpunk, valentine, forest, aqua, lofi, pastel, fantasy, wireframe, black, luxury, dracula, cmyk, autumn, business, acid, lemonade, night, coffee, winter;
 }
 
 :root {
 	--font-heading: "Montserrat", sans-serif;
 	--font-sans: "Inter", sans-serif;
-
-	--primary-color: #1a9fff;
 }
 
 body {
   @apply antialiased;
-}
-
-.page-enter-active,
-.page-leave-active {
-  transition: all 0.15s ease-out;
-}
-
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-
-@layer base {
-
 }
 
 @layer utilities {
