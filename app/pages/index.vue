@@ -180,6 +180,7 @@
         :beat-data="beatData"
         :selected-categories="selectedCategories"
         :video-metadata="wizard.videoMetadata.value"
+        :beat-count="beatTimeline.length"
         @back="wizard.previousStep()"
         @generate="handleGenerate"
         @update:options="wizard.generationOptions.value = $event"
@@ -187,6 +188,43 @@
     </div>
 
     <AppThemeSwitcher v-model="isThemeDrawerOpen" />
+
+    <!-- Video Preview Modal -->
+    <div v-if="showVideoPreview" class="modal modal-open">
+      <div class="modal-box max-w-5xl">
+        <h3 class="font-bold text-lg mb-4">Video Preview</h3>
+
+        <div class="mb-4">
+          <video
+            v-if="previewVideoUrl"
+            :src="previewVideoUrl"
+            controls
+            class="w-full rounded-lg"
+            autoplay
+          />
+        </div>
+
+        <div class="alert alert-success mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <div>
+            <p class="font-semibold">Video generated successfully!</p>
+            <p class="text-sm">Generated {{ beatTimeline.length }} beat-synced segments from {{ wizard.selectedVideos.value.length }} video clips</p>
+          </div>
+        </div>
+
+        <div class="modal-action">
+          <button @click="downloadVideo" class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+            </svg>
+            Download Video
+          </button>
+          <button @click="closePreview" class="btn">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -234,6 +272,7 @@ const {
   lastDetectedCategory,
   calculateAllFluxValues,
   detectBeatsAllCategories,
+  detectBeatsOffline,
   triggerBeatVisual,
   resetBeatDetection,
   toggleCategory,
@@ -244,6 +283,16 @@ const {
 
 // Store the beat timeline for video generation
 const beatTimeline = ref<any[]>([])
+
+// Video preview state
+const showVideoPreview = ref(false)
+const generatedVideoBlob = ref<Blob | null>(null)
+const previewVideoUrl = computed(() => {
+  if (generatedVideoBlob.value) {
+    return URL.createObjectURL(generatedVideoBlob.value)
+  }
+  return null
+})
 
 // Handle audio selection from public/data folder
 const handleAudioSelected = async (audioPath: string) => {
@@ -292,51 +341,28 @@ const handleAudioSelected = async (audioPath: string) => {
 const analyzeFullAudio = async () => {
   if (!audioContext.value || !audioBuffer.value) return
 
-  // Create an offline audio context for analysis
-  const offlineContext = new OfflineAudioContext(
-    audioBuffer.value.numberOfChannels,
-    audioBuffer.value.length,
-    audioBuffer.value.sampleRate
-  )
-
-  const source = offlineContext.createBufferSource()
-  source.buffer = audioBuffer.value
-
-  const analyser = offlineContext.createAnalyser()
-  analyser.fftSize = 512
-  analyser.smoothingTimeConstant = 0.3
-
-  source.connect(analyser)
-  analyser.connect(offlineContext.destination)
-
-  // Analyze in chunks
-  const chunkSize = 2048 // Analyze every ~46ms at 44.1kHz
-  const numChunks = Math.floor(audioBuffer.value.length / chunkSize)
-  const floatFrequencyData = new Float32Array(analyser.frequencyBinCount)
+  console.log('Starting offline audio analysis...')
 
   // Reset beat detection state
   resetBeatDetection()
 
-  source.start(0)
+  // Analyze in chunks
+  const chunkSize = 2048 // Analyze every ~46ms at 44.1kHz
+  const numChunks = Math.floor(audioBuffer.value.length / chunkSize)
 
   // Process each chunk
   for (let i = 0; i < numChunks; i++) {
-    const currentTime = (i * chunkSize) / audioBuffer.value.sampleRate
+    const currentTimeSeconds = (i * chunkSize) / audioBuffer.value.sampleRate
+    const currentTimeMs = currentTimeSeconds * 1000 // Convert to milliseconds
 
-    // Simulate the time for beat detection minimum interval checks
-    const mockNow = currentTime * 1000 // Convert to milliseconds
-
-    // Get frequency data at this time
-    // Note: We can't actually get data from OfflineAudioContext in real-time
-    // So we'll use the regular AudioContext approach with a scheduled playback
-
-    // For offline analysis, we need to process the audio buffer manually
     // Extract frequency data from the raw audio buffer
-    analyseAudioChunk(audioBuffer.value, i * chunkSize, chunkSize, mockNow)
+    analyseAudioChunk(audioBuffer.value, i * chunkSize, chunkSize, currentTimeMs)
   }
 
   // Build the beat timeline
   beatTimeline.value = buildBeatTimeline(duration.value)
+
+  console.log(`Offline analysis complete: ${beatTimeline.value.length} beat segments detected`)
 }
 
 // Analyze a chunk of audio data for beat detection
@@ -344,7 +370,7 @@ const analyseAudioChunk = (
   buffer: AudioBuffer,
   startSample: number,
   chunkSize: number,
-  _currentTime: number
+  currentTimeMs: number
 ) => {
   // Create a simple FFT-like analysis
   const channelData = buffer.getChannelData(0)
@@ -367,8 +393,8 @@ const analyseAudioChunk = (
   // Calculate flux for all categories
   const fluxValues = calculateAllFluxValues(floatFrequencyData)
 
-  // Detect beats (this will update beatDetectionHistory)
-  detectBeatsAllCategories(fluxValues)
+  // Detect beats using offline mode with custom timestamp
+  detectBeatsOffline(fluxValues, currentTimeMs)
 }
 
 const togglePlay = () => {
@@ -674,29 +700,41 @@ const handleGenerate = async () => {
     wizard.generationProgress.value = 90
 
     // Download the result
-    console.log('Step 4/5: Downloading result...')
+    console.log('Step 4/4: Receiving video...')
     const blob = await response.blob()
     console.log(`✓ Video received (${(blob.size / 1024 / 1024).toFixed(2)} MB)`)
-    wizard.generationProgress.value = 95
-
-    console.log('Step 5/5: Triggering download...')
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `beat-synced-${Date.now()}.mp4`
-    a.click()
-    console.log('✓ Download triggered')
-
-    URL.revokeObjectURL(url)
-
     wizard.generationProgress.value = 100
+
+    // Store the video blob for preview
+    generatedVideoBlob.value = blob
+    showVideoPreview.value = true
+
     console.log('=== VIDEO GENERATION COMPLETE ===')
-    alert('Video generated successfully and downloaded!')
   } catch (error) {
     console.error('Generation error:', error)
     alert(`Error generating video: ${error}`)
   } finally {
     wizard.isGenerating.value = false
+  }
+}
+
+const downloadVideo = () => {
+  if (!generatedVideoBlob.value) return
+
+  const url = URL.createObjectURL(generatedVideoBlob.value)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `beat-synced-${Date.now()}.mp4`
+  a.click()
+  URL.revokeObjectURL(url)
+
+  console.log('✓ Video downloaded')
+}
+
+const closePreview = () => {
+  showVideoPreview.value = false
+  if (generatedVideoBlob.value) {
+    generatedVideoBlob.value = null
   }
 }
 
@@ -882,6 +920,10 @@ onUnmounted(() => {
   wizard.clearVideos()
   if (audioContext.value) {
     audioContext.value.close()
+  }
+  // Clean up video preview URL
+  if (previewVideoUrl.value) {
+    URL.revokeObjectURL(previewVideoUrl.value)
   }
 })
 </script>

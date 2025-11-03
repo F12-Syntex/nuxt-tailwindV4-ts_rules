@@ -167,6 +167,72 @@ export const useBeatDetection = () => {
     return detectedCategory
   }
 
+  // Offline beat detection that uses a custom timestamp instead of Date.now()
+  const detectBeatsOffline = (fluxValues: Record<BeatCategory, number>, currentTimeMs: number): BeatCategory | null => {
+    let detectedCategory: BeatCategory | null = null
+
+    for (const category of selectedCategories.value) {
+      const flux = fluxValues[category]
+      if (detectCategoryBeatOffline(flux, category, currentTimeMs)) {
+        if (!detectedCategory || getCategoryPriority(category) > getCategoryPriority(detectedCategory)) {
+          detectedCategory = category
+        }
+      }
+    }
+
+    return detectedCategory
+  }
+
+  const detectCategoryBeatOffline = (flux: number, category: BeatCategory, currentTimeMs: number): boolean => {
+    const history = fluxHistory.value[category]
+    history.push(flux)
+
+    if (history.length > FLUX_HISTORY_SIZE) {
+      history.shift()
+    }
+
+    if (history.length < 30) {
+      return false
+    }
+
+    const sortedFlux = [...history].sort((a, b) => a - b)
+    const medianFlux = sortedFlux[Math.floor(sortedFlux.length / 2)]!
+    const avgFlux = history.reduce((a, b) => a + b, 0) / history.length
+
+    const variance = history.reduce((sum, val) => {
+      return sum + Math.pow(val - avgFlux, 2)
+    }, 0) / history.length
+    const stdDev = Math.sqrt(variance)
+
+    const sensitivityMultiplier = category === 'hihat' ? 1.8 : category === 'kick' ? 2.2 : 2.0
+    const threshold = Math.max(medianFlux, avgFlux) + (stdDev * sensitivityMultiplier)
+
+    // Use the passed currentTimeMs instead of Date.now()
+    const beatHistory = beatDetectionHistory.value[category]
+    const lastBeatTime = beatHistory[beatHistory.length - 1] ?? 0
+    const timeSinceLastBeat = currentTimeMs - lastBeatTime
+
+    const recentHistory = history.slice(-5, -1)
+    const isLocalMax = recentHistory.length > 0 && recentHistory.every(val => flux > val)
+
+    const minFluxValue = medianFlux * 1.3
+    const minInterval = CATEGORY_MIN_INTERVALS[category]
+
+    if (flux > threshold && isLocalMax && flux > minFluxValue && timeSinceLastBeat > minInterval) {
+      beatHistory.push(currentTimeMs)
+      if (beatHistory.length > 10) {
+        beatHistory.shift()
+      }
+
+      categoryStats.value[category].count++
+      categoryStats.value[category].lastDetected = currentTimeMs
+
+      return true
+    }
+
+    return false
+  }
+
   const getCategoryPriority = (category: BeatCategory): number => {
     const priorities: Record<BeatCategory, number> = {
       kick: 100,
@@ -295,6 +361,7 @@ export const useBeatDetection = () => {
     // Methods
     calculateAllFluxValues,
     detectBeatsAllCategories,
+    detectBeatsOffline,
     triggerBeatVisual,
     resetBeatDetection,
     toggleCategory,

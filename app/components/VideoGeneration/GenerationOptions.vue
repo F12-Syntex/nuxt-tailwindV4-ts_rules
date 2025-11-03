@@ -97,7 +97,7 @@
             </svg>
             Audio Track
           </h4>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div class="stat bg-base-200 rounded-lg p-4">
               <div class="stat-title text-xs">Duration</div>
               <div class="stat-value text-lg">{{ formatTime(audioDuration) }}</div>
@@ -105,6 +105,10 @@
             <div class="stat bg-base-200 rounded-lg p-4">
               <div class="stat-title text-xs">BPM</div>
               <div class="stat-value text-lg">{{ beatData?.bpm || 'N/A' }}</div>
+            </div>
+            <div class="stat bg-base-200 rounded-lg p-4">
+              <div class="stat-title text-xs">Beats Detected</div>
+              <div class="stat-value text-lg text-primary">{{ beatCount }}</div>
             </div>
             <div class="stat bg-base-200 rounded-lg p-4">
               <div class="stat-title text-xs">Beat Categories</div>
@@ -222,6 +226,7 @@ const props = defineProps<{
   beatData: { bpm: number; offset: number; tempo: number } | null
   selectedCategories: Set<BeatCategory>
   videoMetadata: Map<string, VideoMetadata>
+  beatCount: number
 }>()
 
 defineEmits<{
