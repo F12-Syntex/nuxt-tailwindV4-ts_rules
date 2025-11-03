@@ -19,137 +19,142 @@
       </button>
     </div>
 
-    <div class="card bg-base-100 shadow-xl">
+    <!-- Loading State -->
+    <div v-if="isLoadingFiles" class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h3 class="card-title mb-4">Upload Video Files</h3>
-        <p class="text-sm text-base-content/70 mb-4">
-          Select multiple video files or drag a folder. The system will recursively find all videos and sync clips to your audio beats.
-        </p>
+        <div class="flex items-center justify-center gap-4">
+          <span class="loading loading-spinner loading-lg"></span>
+          <span class="text-lg">Scanning for video files in public/data...</span>
+        </div>
+      </div>
+    </div>
 
-        <div
-          @drop.prevent="handleDrop"
-          @dragover.prevent="isDragging = true"
-          @dragleave.prevent="isDragging = false"
-          :class="[
-            'border-4 border-dashed rounded-2xl p-12 transition-all duration-200',
-            isDragging
-              ? 'border-primary bg-primary/10 scale-105'
-              : 'border-base-300 hover:border-primary/50'
-          ]"
-        >
-          <input
-            ref="fileInput"
-            type="file"
-            accept="video/*"
-            multiple
-            @change="handleFileSelect"
-            class="hidden"
-          />
-          <div class="flex flex-col items-center gap-4">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-16 w-16 text-primary"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-            <p class="text-xl font-semibold">Drag & Drop Video Files Here</p>
-            <p class="text-sm text-base-content/60">or</p>
-            <button @click="fileInput?.click()" class="btn btn-primary">
-              Browse Videos
-            </button>
+    <!-- Available Videos -->
+    <div v-else class="card bg-base-100 shadow-xl">
+      <div class="card-body">
+        <h3 class="card-title mb-4">Available Videos (from public/data)</h3>
+
+        <div v-if="availableVideos.length === 0" class="alert alert-info">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <div>
+            <p class="font-semibold">No videos found</p>
+            <p class="text-sm">Place your video files in the <code class="bg-base-300 px-1 rounded">public/data/</code> directory</p>
           </div>
         </div>
 
-        <!-- Video Previews -->
-        <div v-if="selectedVideos.length > 0" class="mt-6">
-          <h4 class="font-semibold mb-3">
-            Selected Videos ({{ selectedVideos.length }})
-          </h4>
-          <div class="space-y-4">
-            <div
-              v-for="(video, index) in selectedVideos"
-              :key="index"
-              class="card bg-base-200 p-4"
-            >
-              <div class="flex gap-4">
-                <!-- Video Preview -->
-                <div class="relative group flex-shrink-0">
-                  <div class="w-48 aspect-video bg-base-300 rounded-lg overflow-hidden">
-                    <video
-                      :ref="(el) => setVideoRef(video.name, el as HTMLVideoElement)"
-                      :src="videoPreviewUrls.get(video.name)"
-                      class="w-full h-full object-cover"
-                      muted
-                      controls
-                    ></video>
-                  </div>
-                  <button
-                    @click="$emit('remove-video', index)"
-                    class="absolute top-1 right-1 btn btn-circle btn-xs btn-error opacity-0 group-hover:opacity-100 transition-opacity"
+        <div v-else class="space-y-2">
+          <div v-for="video in availableVideos" :key="video.path" class="flex items-center gap-3 p-3 bg-base-200 rounded-lg">
+            <input
+              type="checkbox"
+              :checked="isVideoSelected(video.path)"
+              @change="toggleVideo(video)"
+              class="checkbox checkbox-primary"
+            />
+            <div class="flex-1">
+              <div class="font-medium">{{ video.name }}</div>
+              <div class="text-xs text-base-content/60">
+                {{ video.path }} • {{ formatFileSize(video.size) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          @click="refreshFiles"
+          class="btn btn-outline btn-sm mt-4"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+          </svg>
+          Refresh Files
+        </button>
+      </div>
+    </div>
+
+    <!-- Selected Videos Preview -->
+    <div v-if="selectedVideos.length > 0" class="card bg-base-100 shadow-xl">
+      <div class="card-body">
+        <h3 class="card-title mb-4">
+          Selected Videos ({{ selectedVideos.length }})
+        </h3>
+        <div class="space-y-4">
+          <div
+            v-for="(video, index) in selectedVideos"
+            :key="video.path"
+            class="card bg-base-200 p-4"
+          >
+            <div class="flex gap-4">
+              <!-- Video Preview -->
+              <div class="relative group flex-shrink-0">
+                <div class="w-48 aspect-video bg-base-300 rounded-lg overflow-hidden">
+                  <video
+                    :ref="(el) => setVideoRef(video.path, el as HTMLVideoElement)"
+                    :src="`/data/${video.path}`"
+                    class="w-full h-full object-cover"
+                    muted
+                    controls
+                  ></video>
+                </div>
+                <button
+                  @click="$emit('remove-video', index)"
+                  class="absolute top-1 right-1 btn btn-circle btn-xs btn-error opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-4 w-4"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </button>
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Video Info and Trigger Points -->
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-sm truncate mb-2">{{ video.name }}</div>
+
+                <div v-if="videoMetadata.get(video.path)?.isAnalyzing" class="flex items-center gap-2 text-sm">
+                  <span class="loading loading-spinner loading-xs"></span>
+                  <span class="text-base-content/60">Analyzing audio energy...</span>
                 </div>
 
-                <!-- Video Info and Trigger Points -->
-                <div class="flex-1 min-w-0">
-                  <div class="font-semibold text-sm truncate mb-2">{{ video.name }}</div>
-
-                  <div v-if="videoMetadata.get(video.name)?.isAnalyzing" class="flex items-center gap-2 text-sm">
-                    <span class="loading loading-spinner loading-xs"></span>
-                    <span class="text-base-content/60">Analyzing audio energy...</span>
+                <div v-else-if="videoMetadata.get(video.path)" class="space-y-2">
+                  <div class="text-sm text-base-content/70">
+                    Duration: {{ formatDuration(videoMetadata.get(video.path)!.duration) }} |
+                    Trigger Points: {{ videoMetadata.get(video.path)!.triggerPoints.length }}
                   </div>
 
-                  <div v-else-if="videoMetadata.get(video.name)" class="space-y-2">
-                    <div class="text-sm text-base-content/70">
-                      Duration: {{ formatDuration(videoMetadata.get(video.name)!.duration) }} |
-                      Trigger Points: {{ videoMetadata.get(video.name)!.triggerPoints.length }}
+                  <!-- Trigger Points Timeline -->
+                  <div v-if="videoMetadata.get(video.path)!.triggerPoints.length > 0">
+                    <div class="text-xs font-semibold mb-1 text-base-content/80">High Energy Points:</div>
+                    <div class="relative h-8 bg-base-300 rounded-lg overflow-hidden">
+                      <!-- Timeline markers -->
+                      <div
+                        v-for="(point, pointIndex) in videoMetadata.get(video.path)!.triggerPoints"
+                        :key="pointIndex"
+                        :style="{
+                          left: `${(point.time / videoMetadata.get(video.path)!.duration) * 100}%`,
+                          height: `${Math.max(20, point.intensity * 100)}%`
+                        }"
+                        :title="`Click to preview at ${formatDuration(point.time)} - Energy: ${(point.intensity * 100).toFixed(0)}%`"
+                        @click="seekToTriggerPoint(video.path, point.time)"
+                        class="absolute bottom-0 w-1 bg-primary hover:bg-primary-focus hover:w-2 cursor-pointer transition-all"
+                      ></div>
                     </div>
+                    <div class="text-xs text-base-content/60 mt-1">
+                      Markers show high audio energy points - ideal starting points for video clips
+                    </div>
+                  </div>
 
-                    <!-- Trigger Points Timeline -->
-                    <div v-if="videoMetadata.get(video.name)!.triggerPoints.length > 0">
-                      <div class="text-xs font-semibold mb-1 text-base-content/80">High Energy Points:</div>
-                      <div class="relative h-8 bg-base-300 rounded-lg overflow-hidden">
-                        <!-- Timeline markers -->
-                        <div
-                          v-for="(point, pointIndex) in videoMetadata.get(video.name)!.triggerPoints"
-                          :key="pointIndex"
-                          :style="{
-                            left: `${(point.time / videoMetadata.get(video.name)!.duration) * 100}%`,
-                            height: `${Math.max(20, point.intensity * 100)}%`
-                          }"
-                          :title="`Click to preview at ${formatDuration(point.time)} - Energy: ${(point.intensity * 100).toFixed(0)}%`"
-                          @click="seekToTriggerPoint(video.name, point.time)"
-                          class="absolute bottom-0 w-1 bg-primary hover:bg-primary-focus hover:w-2 cursor-pointer transition-all"
-                        ></div>
-                      </div>
-                      <div class="text-xs text-base-content/60 mt-1">
-                        Markers show high audio energy points - ideal starting points for video clips
-                      </div>
-                    </div>
-
-                    <div v-else class="text-sm text-warning">
-                      No high energy points detected. Video may have low or silent audio.
-                    </div>
+                  <div v-else class="text-sm text-warning">
+                    No high energy points detected. Video may have low or silent audio.
                   </div>
                 </div>
               </div>
@@ -195,11 +200,10 @@
 </template>
 
 <script setup lang="ts">
-import type { VideoMetadata } from '~/composables/useVideoWizard'
+import type { VideoFile, VideoMetadata } from '~/composables/useVideoWizard'
 
 const props = defineProps<{
-  selectedVideos: File[]
-  videoPreviewUrls: Map<string, string>
+  selectedVideos: VideoFile[]
   videoMetadata: Map<string, VideoMetadata>
   allVideosAnalyzed: boolean
 }>()
@@ -207,12 +211,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   back: []
   next: []
-  'add-videos': [files: File[]]
+  'add-videos': [videos: VideoFile[]]
   'remove-video': [index: number]
 }>()
 
-const fileInput = ref<HTMLInputElement | null>(null)
-const isDragging = ref(false)
+const isLoadingFiles = ref(true)
+const availableVideos = ref<VideoFile[]>([])
 const videoRefs = ref<Map<string, HTMLVideoElement>>(new Map())
 
 const formatDuration = (seconds: number): string => {
@@ -221,85 +225,66 @@ const formatDuration = (seconds: number): string => {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-const setVideoRef = (videoName: string, el: HTMLVideoElement | null) => {
+const formatFileSize = (bytes: number): string => {
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1) {
+    return `${mb.toFixed(2)} MB`
+  }
+  const kb = bytes / 1024
+  return `${kb.toFixed(2)} KB`
+}
+
+const setVideoRef = (videoPath: string, el: HTMLVideoElement | null) => {
   if (el) {
-    videoRefs.value.set(videoName, el)
+    videoRefs.value.set(videoPath, el)
   } else {
-    videoRefs.value.delete(videoName)
+    videoRefs.value.delete(videoPath)
   }
 }
 
-const seekToTriggerPoint = (videoName: string, time: number) => {
-  const videoElement = videoRefs.value.get(videoName)
+const seekToTriggerPoint = (videoPath: string, time: number) => {
+  const videoElement = videoRefs.value.get(videoPath)
   if (videoElement) {
     videoElement.currentTime = time
     videoElement.play()
   }
 }
 
-const handleFileSelect = async (e: Event) => {
-  const target = e.target as HTMLInputElement
-  const files = target.files
-  if (files) {
-    emit('add-videos', Array.from(files))
-  }
+const isVideoSelected = (path: string): boolean => {
+  return props.selectedVideos.some(v => v.path === path)
 }
 
-const handleDrop = async (e: DragEvent) => {
-  isDragging.value = false
-  const items = e.dataTransfer?.items
-
-  if (items) {
-    const videoFiles: File[] = []
-
-    // Process all dropped items (files or folders)
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      if (item?.kind === 'file') {
-        const entry = item.webkitGetAsEntry()
-        if (entry) {
-          await processEntry(entry, videoFiles)
-        }
-      }
-    }
-
-    if (videoFiles.length > 0) {
-      emit('add-videos', videoFiles)
+const toggleVideo = (video: VideoFile) => {
+  if (isVideoSelected(video.path)) {
+    const index = props.selectedVideos.findIndex(v => v.path === video.path)
+    if (index !== -1) {
+      emit('remove-video', index)
     }
   } else {
-    // Fallback for browsers that don't support DataTransferItem
-    const files = e.dataTransfer?.files
-    if (files) {
-      emit('add-videos', Array.from(files))
-    }
+    emit('add-videos', [video])
   }
 }
 
-// Recursively process file system entries (files and folders)
-const processEntry = async (entry: FileSystemEntry, videoFiles: File[]): Promise<void> => {
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry
-    const file = await new Promise<File>((resolve, reject) => {
-      fileEntry.file(resolve, reject)
-    })
-
-    // Check if it's a video file
-    if (file.type.startsWith('video/')) {
-      videoFiles.push(file)
-    }
-  } else if (entry.isDirectory) {
-    const dirEntry = entry as FileSystemDirectoryEntry
-    const reader = dirEntry.createReader()
-
-    // Read all entries in the directory
-    const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
-      reader.readEntries(resolve, reject)
-    })
-
-    // Recursively process each entry
-    for (const childEntry of entries) {
-      await processEntry(childEntry, videoFiles)
-    }
+const fetchAvailableVideos = async () => {
+  isLoadingFiles.value = true
+  try {
+    const response = await fetch('/api/scan-files')
+    const data = await response.json()
+    availableVideos.value = data.video || []
+    console.log(`Found ${availableVideos.value.length} videos in public/data`)
+  } catch (error) {
+    console.error('Error fetching video files:', error)
+  } finally {
+    isLoadingFiles.value = false
   }
 }
+
+const refreshFiles = () => {
+  fetchAvailableVideos()
+}
+
+// Load files on component mount
+onMounted(() => {
+  fetchAvailableVideos()
+})
 </script>

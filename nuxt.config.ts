@@ -59,6 +59,12 @@ export default defineNuxtConfig({
 
 	compatibilityDate: '2025-03-01',
 
+	nitro: {
+		experimental: {
+			bodySizeLimit: '500mb'
+		}
+	},
+
 	vite: {
 		plugins: [
 			tailwindcss()

@@ -17,45 +17,11 @@
       <!-- Step Indicator (always show) -->
       <StepIndicator :current-step="wizard.currentStep.value" />
 
-      <!-- STEP 1: Audio Upload (no audio yet) -->
-      <div v-if="!audioBuffer" class="hero bg-base-100 rounded-box shadow-xl min-h-[500px]">
-        <div class="hero-content text-center">
-          <div class="max-w-2xl w-full">
-            <h1 class="text-5xl font-bold mb-4">Drop Your Beat</h1>
-            <p class="py-6 text-lg">
-              Upload an MP3 file to analyze and visualize its tempo
-            </p>
-
-            <div
-              @drop.prevent="handleDrop"
-              @dragover.prevent="isDragging = true"
-              @dragleave.prevent="isDragging = false"
-              :class="[
-                'border-4 border-dashed rounded-2xl p-16 transition-all duration-200',
-                isDragging ? 'border-primary bg-primary/10 scale-105' : 'border-base-300 hover:border-primary/50'
-              ]"
-            >
-              <input
-                ref="fileInput"
-                type="file"
-                accept="audio/mp3,audio/mpeg"
-                @change="handleFileSelect"
-                class="hidden"
-              />
-              <div class="flex flex-col items-center gap-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-20 w-20 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                </svg>
-                <p class="text-xl font-semibold">Drag & Drop MP3 File Here</p>
-                <p class="text-sm text-base-content/60">or</p>
-                <button @click="fileInput?.click()" class="btn btn-primary btn-lg">
-                  Browse Files
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- STEP 1: Audio Selection (no audio yet) -->
+      <AudioSelection
+        v-if="!audioBuffer"
+        @audio-selected="handleAudioSelected"
+      />
 
       <!-- STEP 1: Audio Analysis (when loaded and on audio step) -->
       <div v-else-if="wizard.currentStep.value === 'audio'">
@@ -194,7 +160,6 @@
       <VideoSelection
         v-else-if="wizard.currentStep.value === 'videos'"
         :selected-videos="wizard.selectedVideos.value"
-        :video-preview-urls="wizard.videoPreviewUrls.value"
         :video-metadata="wizard.videoMetadata.value"
         :all-videos-analyzed="wizard.allVideosAnalyzed.value"
         @back="wizard.previousStep()"
@@ -236,8 +201,6 @@ import BeatCategorySelector from '~/components/AudioAnalysis/BeatCategorySelecto
 
 const themeStore = useThemeStore()
 const isThemeDrawerOpen = ref(false)
-const isDragging = ref(false)
-const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = ref('')
 const audioBuffer = ref<AudioBuffer | null>(null)
 const isAnalyzing = ref(false)
@@ -282,30 +245,16 @@ const {
 // Store the beat timeline for video generation
 const beatTimeline = ref<any[]>([])
 
-const handleDrop = async (e: DragEvent) => {
-  isDragging.value = false
-  const files = e.dataTransfer?.files
-  if (files && files.length > 0) {
-    await processFile(files[0])
-  }
-}
-
-const handleFileSelect = async (e: Event) => {
-  const target = e.target as HTMLInputElement
-  const files = target.files
-  if (files && files.length > 0) {
-    await processFile(files[0])
-  }
-}
-
-const processFile = async (file: File | undefined) => {
-  if (!file) return
-
-  fileName.value = file.name
+// Handle audio selection from public/data folder
+const handleAudioSelected = async (audioPath: string) => {
+  fileName.value = audioPath.split('/').pop() || audioPath
   isAnalyzing.value = true
 
   try {
-    const arrayBuffer = await file.arrayBuffer()
+    // Fetch audio file from public folder
+    const response = await fetch(`/data/${audioPath}`)
+    const arrayBuffer = await response.arrayBuffer()
+
     if (!audioContext.value) {
       audioContext.value = new AudioContext()
     }
@@ -665,32 +614,56 @@ const handleGenerate = async () => {
     console.log('Options:', wizard.generationOptions.value)
 
     // Prepare data for server
-    console.log('Step 1/5: Exporting audio buffer to WAV...')
+    console.log('Step 1/4: Exporting audio buffer to base64...')
     const audioBlob = await exportAudioBuffer(audioBuffer.value)
+    const audioBase64 = await blobToBase64(audioBlob)
     console.log(`✓ Audio exported (${(audioBlob.size / 1024 / 1024).toFixed(2)} MB)`)
     wizard.generationProgress.value = 10
 
-    // Create form data
-    console.log('Step 2/5: Preparing form data...')
-    const formData = new FormData()
-    formData.append('audio', audioBlob, 'audio.wav')
-    formData.append('timeline', JSON.stringify(beatTimeline.value))
-    formData.append('options', JSON.stringify(wizard.generationOptions.value))
+    // Prepare JSON data
+    console.log('Step 2/4: Preparing request data...')
 
-    // Add video files
-    for (let i = 0; i < wizard.selectedVideos.value.length; i++) {
-      const video = wizard.selectedVideos.value[i]!
-      formData.append(`video_${i}`, video, video.name)
-      console.log(`  Added video ${i + 1}/${wizard.selectedVideos.value.length}: ${video.name}`)
+    // Audio metadata
+    const audioMetadata = {
+      duration: duration.value,
+      bpm: beatData.value?.bpm,
+      tempo: beatData.value?.tempo,
+      offset: beatData.value?.offset,
+      selectedCategories: Array.from(selectedCategories.value)
     }
-    console.log('✓ Form data prepared')
+
+    // Video metadata with paths
+    const videoMetadataArray = wizard.selectedVideos.value.map(video => {
+      const metadata = wizard.videoMetadata.value.get(video.path)
+      return {
+        path: video.path,
+        duration: metadata?.duration || 0,
+        triggerPoints: metadata?.triggerPoints || []
+      }
+    })
+
+    // Video paths only (no file data)
+    const videoPaths = wizard.selectedVideos.value.map(v => v.path)
+
+    console.log('  Video paths:', videoPaths)
+    console.log('✓ Data prepared')
     wizard.generationProgress.value = 20
 
     // Send to server
-    console.log('Step 3/5: Uploading to server...')
+    console.log('Step 3/4: Sending to server...')
     const response = await fetch('/api/generate-video', {
       method: 'POST',
-      body: formData
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        audioData: audioBase64,
+        beatTimeline: beatTimeline.value,
+        options: wizard.generationOptions.value,
+        audioMetadata,
+        videoMetadata: videoMetadataArray,
+        videoPaths
+      })
     })
 
     if (!response.ok) {
@@ -725,6 +698,20 @@ const handleGenerate = async () => {
   } finally {
     wizard.isGenerating.value = false
   }
+}
+
+// Helper function to convert Blob to base64
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const base64 = reader.result as string
+      // Remove the data:audio/wav;base64, prefix
+      resolve(base64.split(',')[1] || '')
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
 }
 
 // Export audio buffer to WAV blob

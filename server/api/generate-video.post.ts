@@ -9,7 +9,8 @@ const execAsync = promisify(exec)
 
 export default defineEventHandler(async (event) => {
 	try {
-		const body = await readMultipartFormData(event)
+		const body = await readBody(event)
+
 		if (!body) {
 			throw new Error('No data received')
 		}
@@ -20,70 +21,194 @@ export default defineEventHandler(async (event) => {
 		console.log('=== SERVER-SIDE VIDEO GENERATION ===')
 		console.log('Temp directory:', tempDir)
 
-		let audioData: Buffer | null = null
-		let beatTimeline: any[] = []
-		let options: any = {}
-		let audioMetadata: any = null
-		let videoMetadata: any[] = []
-		const videoFiles: Array<{ filename: string; data: Buffer }> = []
+		const { audioData, beatTimeline, options, audioMetadata, videoMetadata, videoPaths } = body
 
-		for (const part of body) {
-			if (part.name === 'audio') {
-				audioData = Buffer.from(part.data)
-				console.log(`✓ Audio received (${(audioData.length / 1024 / 1024).toFixed(2)} MB)`)
-			} else if (part.name === 'timeline') {
-				beatTimeline = JSON.parse(Buffer.from(part.data).toString())
-				console.log(`✓ Beat timeline received (${beatTimeline.length} segments)`)
-			} else if (part.name === 'options') {
-				options = JSON.parse(Buffer.from(part.data).toString())
-				console.log('✓ Options received:', options)
-			} else if (part.name === 'audioMetadata') {
-				audioMetadata = JSON.parse(Buffer.from(part.data).toString())
-				console.log('✓ Audio metadata received')
-			} else if (part.name === 'videoMetadata') {
-				videoMetadata = JSON.parse(Buffer.from(part.data).toString())
-				console.log('✓ Video metadata received')
-			} else if (part.name?.startsWith('video_')) {
-				videoFiles.push({
-					filename: part.filename || `video${videoFiles.length}.mp4`,
-					data: Buffer.from(part.data)
-				})
-			}
-		}
-
-		if (!audioData || beatTimeline.length === 0 || videoFiles.length === 0) {
+		if (!audioData || !beatTimeline || beatTimeline.length === 0 || !videoPaths || videoPaths.length === 0) {
 			throw new Error('Missing required data')
 		}
 
-		console.log(`✓ Received ${videoFiles.length} video files`)
+		console.log(`✓ Received ${videoPaths.length} video file paths`)
 
-		const audioPath = join(tempDir, 'audio.wav')
-		await writeFile(audioPath, audioData)
-		console.log('✓ Audio file written')
+		// Print detailed information
+		console.log('\n=== DETAILED DATA SUMMARY ===')
 
-		for (let i = 0; i < videoFiles.length; i++) {
-			const videoPath = join(tempDir, `input${i}.mp4`)
-			await writeFile(videoPath, videoFiles[i]!.data)
-			console.log(`✓ Video ${i + 1}/${videoFiles.length} written: ${videoFiles[i]!.filename}`)
+		// Audio Information
+		console.log('\n📻 AUDIO INFORMATION:')
+		if (audioMetadata) {
+			console.log(`  - Duration: ${audioMetadata.duration}s`)
+			console.log(`  - BPM: ${audioMetadata.bpm}`)
+			console.log(`  - Tempo: ${audioMetadata.tempo}`)
+			console.log(`  - First Beat Offset: ${audioMetadata.offset}s`)
+			console.log(`  - Selected Categories: ${audioMetadata.selectedCategories?.join(', ') || 'None'}`)
+		} else {
+			console.log('  ⚠ No audio metadata provided')
 		}
 
-		console.log('Creating beat-synced segments...')
-		let concatContent = ''
+		// Beat Timeline
+		console.log('\n🎵 BEAT TIMELINE:')
+		console.log(`  - Total Beat Segments: ${beatTimeline.length}`)
+		if (beatTimeline.length > 0) {
+			console.log(`  - First segment: ${beatTimeline[0].startTime}s - ${beatTimeline[0].endTime}s (${beatTimeline[0].category})`)
+			console.log(`  - Last segment: ${beatTimeline[beatTimeline.length - 1].startTime}s - ${beatTimeline[beatTimeline.length - 1].endTime}s (${beatTimeline[beatTimeline.length - 1].category})`)
+
+			// Group by category
+			const categoryCounts: Record<string, number> = {}
+			beatTimeline.forEach(segment => {
+				categoryCounts[segment.category] = (categoryCounts[segment.category] || 0) + 1
+			})
+			console.log('  - Segments per category:')
+			Object.entries(categoryCounts).forEach(([category, count]) => {
+				console.log(`    • ${category}: ${count} segments`)
+			})
+		}
+
+		// Video Information
+		console.log('\n🎬 VIDEO INFORMATION:')
+		console.log(`  - Total Videos: ${videoPaths.length}`)
+
+		if (videoMetadata && videoMetadata.length > 0) {
+			console.log('\n  Video Details:')
+			videoMetadata.forEach((meta: any, index: number) => {
+				console.log(`\n  Video ${index + 1}: ${meta.path}`)
+				console.log(`    - Duration: ${meta.duration.toFixed(2)}s`)
+				console.log(`    - Trigger Points: ${meta.triggerPoints.length}`)
+
+				if (meta.triggerPoints.length > 0) {
+					console.log(`    - First trigger: ${meta.triggerPoints[0].time.toFixed(2)}s (intensity: ${(meta.triggerPoints[0].intensity * 100).toFixed(0)}%)`)
+					console.log(`    - Last trigger: ${meta.triggerPoints[meta.triggerPoints.length - 1].time.toFixed(2)}s (intensity: ${(meta.triggerPoints[meta.triggerPoints.length - 1].intensity * 100).toFixed(0)}%)`)
+
+					// Calculate average intensity
+					const avgIntensity = meta.triggerPoints.reduce((sum: number, tp: any) => sum + tp.intensity, 0) / meta.triggerPoints.length
+					console.log(`    - Average intensity: ${(avgIntensity * 100).toFixed(0)}%`)
+
+					// Show all trigger points
+					console.log('    - All trigger points:')
+					meta.triggerPoints.forEach((tp: any, tpIndex: number) => {
+						console.log(`      ${tpIndex + 1}. ${tp.time.toFixed(2)}s - ${(tp.intensity * 100).toFixed(0)}% energy`)
+					})
+				} else {
+					console.log('    ⚠ No trigger points found in this video')
+				}
+			})
+
+			// Summary statistics
+			const totalTriggerPoints = videoMetadata.reduce((sum: number, meta: any) => sum + meta.triggerPoints.length, 0)
+			const avgTriggersPerVideo = totalTriggerPoints / videoMetadata.length
+			console.log(`\n  📊 Summary Statistics:`)
+			console.log(`    - Total trigger points across all videos: ${totalTriggerPoints}`)
+			console.log(`    - Average trigger points per video: ${avgTriggersPerVideo.toFixed(1)}`)
+		} else {
+			console.log('  ⚠ No video metadata provided')
+		}
+
+		// Generation Options
+		console.log('\n⚙️  GENERATION OPTIONS:')
+		console.log(`  - Include clip audio: ${options.includeClipAudio}`)
+		if (options.includeClipAudio) {
+			console.log(`  - Clip audio volume: ${(options.clipAudioVolume * 100).toFixed(0)}%`)
+		}
+		console.log(`  - Video filter: ${options.videoFilter}`)
+		if (options.videoFilter !== 'none') {
+			console.log(`  - Filter intensity: ${(options.filterIntensity * 100).toFixed(0)}%`)
+		}
+
+		console.log('\n=== END DETAILED SUMMARY ===\n')
+
+		// Write audio file
+		const audioPath = join(tempDir, 'audio.wav')
+		const audioBuffer = Buffer.from(audioData, 'base64')
+		await writeFile(audioPath, audioBuffer)
+		console.log('✓ Audio file written')
+
+		// Get the public/data directory path
+		const publicDataDir = join(process.cwd(), 'public', 'data')
+
+		console.log('\n=== STARTING VIDEO GENERATION ===')
+		console.log('Algorithm: Switch video clips at audio beat points using energy trigger points')
+
+		// Build clips based on beat timeline and video trigger points
+		const clips: Array<{
+			videoIndex: number
+			startTime: number
+			duration: number
+			beatTime: number
+		}> = []
+
+		// Track which videos and trigger points we've used
+		const videoTriggerIndexes = videoMetadata.map(() => 0)
+		let currentVideoIndex = Math.floor(Math.random() * videoPaths.length)
+		let currentTriggerIndex = 0
+
+		console.log(`\nStarting with video ${currentVideoIndex + 1}`)
 
 		for (let i = 0; i < beatTimeline.length; i++) {
-			const segment = beatTimeline[i]!
-			const duration = segment.endTime - segment.startTime
+			const beat = beatTimeline[i]!
+			const beatTime = beat.startTime
+			const nextBeatTime = beatTimeline[i + 1]?.startTime || audioMetadata.duration
 
-			if (duration <= 0) {
-				console.warn(`⚠ Skipping segment ${i + 1} with invalid duration: ${duration.toFixed(3)}s (start: ${segment.startTime}, end: ${segment.endTime})`)
+			// Get the current video's metadata
+			const currentVideoMeta = videoMetadata[currentVideoIndex]
+			if (!currentVideoMeta || !currentVideoMeta.triggerPoints || currentVideoMeta.triggerPoints.length === 0) {
+				console.warn(`⚠ Video ${currentVideoIndex + 1} has no trigger points, skipping...`)
+				// Try next video
+				currentVideoIndex = (currentVideoIndex + 1) % videoPaths.length
 				continue
 			}
 
-			const videoIndex = Math.floor(Math.random() * videoFiles.length)
-			const videoPath = join(tempDir, `input${videoIndex}.mp4`)
+			// Get the current trigger point
+			currentTriggerIndex = videoTriggerIndexes[currentVideoIndex]!
+			if (currentTriggerIndex >= currentVideoMeta.triggerPoints.length) {
+				// Wrap around to beginning of this video's trigger points
+				currentTriggerIndex = 0
+				videoTriggerIndexes[currentVideoIndex] = 0
+			}
+
+			const triggerPoint = currentVideoMeta.triggerPoints[currentTriggerIndex]!
+			const clipStartTime = triggerPoint.time
+			const clipDuration = nextBeatTime - beatTime
+
+			// Make sure we don't exceed the video duration
+			const maxDuration = currentVideoMeta.duration - clipStartTime
+			const actualDuration = Math.min(clipDuration, maxDuration)
+
+			if (actualDuration <= 0) {
+				console.warn(`⚠ Skipping beat ${i + 1}: invalid duration`)
+				continue
+			}
+
+			clips.push({
+				videoIndex: currentVideoIndex,
+				startTime: clipStartTime,
+				duration: actualDuration,
+				beatTime: beatTime
+			})
+
+			console.log(`  Beat ${i + 1}/${beatTimeline.length} at ${beatTime.toFixed(2)}s:`)
+			console.log(`    - Using video ${currentVideoIndex + 1} (${currentVideoMeta.path})`)
+			console.log(`    - Trigger point ${currentTriggerIndex + 1}/${currentVideoMeta.triggerPoints.length} at ${clipStartTime.toFixed(2)}s`)
+			console.log(`    - Clip duration: ${actualDuration.toFixed(2)}s (until next beat at ${nextBeatTime.toFixed(2)}s)`)
+			console.log(`    - Category: ${beat.category}`)
+
+			// Move to next trigger point
+			videoTriggerIndexes[currentVideoIndex] = currentTriggerIndex + 1
+
+			// Switch to a different video for the next beat
+			const nextVideoIndex = Math.floor(Math.random() * videoPaths.length)
+			currentVideoIndex = nextVideoIndex
+		}
+
+		console.log(`\n✓ Generated ${clips.length} clip segments`)
+
+		// Now create the actual video clips using FFmpeg
+		console.log('\nCreating video segments with FFmpeg...')
+		let concatContent = ''
+
+		for (let i = 0; i < clips.length; i++) {
+			const clip = clips[i]!
+			const videoPath = join(publicDataDir, videoPaths[clip.videoIndex])
 			const segmentPath = join(tempDir, `segment${i}.mp4`)
 
-			console.log(`  Segment ${i + 1}/${beatTimeline.length}: ${duration.toFixed(3)}s from video ${videoIndex + 1} (${segment.category})`)
+			console.log(`  Processing segment ${i + 1}/${clips.length}...`)
 
 			let filterArgs = []
 			if (options.videoFilter !== 'none') {
@@ -109,9 +234,9 @@ export default defineEventHandler(async (event) => {
 
 			const cmd = [
 				'ffmpeg',
-				'-ss', '0',
+				'-ss', clip.startTime.toString(),
 				'-i', `"${videoPath}"`,
-				'-t', duration.toString(),
+				'-t', clip.duration.toString(),
 				...filterArgs,
 				'-c:v', 'libx264',
 				'-preset', 'ultrafast',
@@ -123,7 +248,7 @@ export default defineEventHandler(async (event) => {
 			concatContent += `file '${segmentPath}'\n`
 		}
 
-		console.log('✓ All segments created')
+		console.log('✓ All video segments created')
 
 		const concatPath = join(tempDir, 'concat.txt')
 		await writeFile(concatPath, concatContent)
